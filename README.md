@@ -36,6 +36,8 @@ terraform init && terraform apply -auto-approve
 
 ## 🎬 Live Demo
 
+[![Before/After screenshot](assets/cost-explorer1.png)](assets/cost-explorer1.png)
+
 [![Before/After screenshot](assets/before-after.png)](assets/before-after.png)
 
 ▶ **90‑second Loom walkthrough:** [https://loom.com/share/REPLACE\_ME](https://loom.com/share/REPLACE_ME)
@@ -75,6 +77,9 @@ terraform init && terraform apply -auto-approve
 
 
 ### Adding permissions to your AWS credentials:
+
+[![Before/After screenshot](assets/setup-gr-in-aws.png)](assets/setup-gr-in-aws.png)
+
 
 For MAC users, add the following to your `~/.aws/credentials` file:
 
