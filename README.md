@@ -95,6 +95,166 @@ docker exec -u grafana -it grafana cat /usr/share/grafana/.aws/credentials
 2. Set variable `$AWS_ACCOUNT_ID` to your account ID.
 3. Watch the cost line drop like a stone 🪨.
 
+
+## 📊 Extended description Grafana: Setup & Usage
+
+This module ships with a ready-to-import dashboard JSON. You can use Grafana with a **quick path** (Cost data source or built-in cost alerts) or a **power path** (Athena + CUR) for richer analytics.
+
+### 1) Install Grafana (macOS)
+
+**Option A — Docker (quick):**
+
+```bash
+docker run -d --name grafana -p 3000:3000 \
+  -e GF_SECURITY_ADMIN_USER=admin \
+  -e GF_SECURITY_ADMIN_PASSWORD=admin \
+  -v $(pwd)/grafana/provisioning:/etc/grafana/provisioning \
+  -v $(pwd)/grafana/dashboards:/var/lib/grafana/dashboards \
+  grafana/grafana:10.4.0
+```
+
+Open [http://localhost:3000](http://localhost:3000) (admin / admin).
+
+**Option B — Native (Homebrew):**
+
+```bash
+brew install grafana
+brew services start grafana
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+> Tip: If you don’t need provisioning, you can omit the mounted folders in Docker.
+
+---
+
+### 2) Pick your data path
+
+**Quick path — use Cost data source / built-in cost alerts**
+
+* If your Grafana has an **AWS Cost Explorer** (or **Grafana Cloud Cost**) data source available, add it and you’ll get daily spend out-of-the-box.
+* You can then attach an **Alert** to the spend panel (e.g., trigger if daily spend > budget).
+* Alternatively, skip Grafana entirely and enable **AWS Budgets** and **Cost Anomaly Detection** in the AWS console for native cost alerts.
+
+**Power path — Athena over the AWS Cost & Usage Report (CUR)**
+
+* Recommended when you want custom aggregations, tags/linked-account splits, or multi-panel analytics.
+
+---
+
+### 3) Configure the data source
+
+#### A. AWS Cost (if available in your Grafana)
+
+1. **Add data source** → *AWS Cost Explorer* or *Grafana Cloud Cost*.
+2. **Auth**: Use an IAM role on the host or static keys with read-only permissions to Cost Explorer.
+3. **Region**: Cost Explorer is global but API endpoints live in `us-east-1`; set that region if prompted.
+4. **Test & Save**.
+
+#### B. Athena + CUR (advanced)
+
+1. **Enable CUR**: In AWS Billing → Cost & Usage Reports, create a report to S3 (prefer **Parquet**, daily, with partitions).
+2. **Glue Catalog**: Let AWS auto-create the Glue table, or create it manually.
+3. **Athena**: Create a **workgroup** and set **Query results location** (e.g., `s3://athena-results-<acct>-<region>/query-results/`).
+4. **Query**: Build a daily spend view. Example:
+
+```sql
+-- Daily unblended cost
+SELECT date_trunc('day', line_item_usage_start_date) AS day,
+       SUM(line_item_unblended_cost)                AS cost_usd
+FROM   aws_cur.your_cur_table
+WHERE  year = 2025  -- or filter by date range
+GROUP BY 1
+ORDER BY 1;
+```
+
+5. **Grafana data source**: Add **Amazon Athena** data source and point to your **Workgroup**, **Catalog** (usually `AwsDataCatalog`), and **Database**.
+
+---
+
+### 4) Import the dashboard JSON
+
+You can use the repository dashboard as-is:
+
+1. In Grafana → **Dashboards → Import**.
+2. Upload `grafana/grafana-dash.json` (exported with **Export for sharing externally**).
+3. When prompted, **select your data source** (Cost or Athena).
+4. Click **Import**. Done.
+
+> The dashboard expects a daily series named like `cost_by_date` or the SQL above aliased as `cost_usd`. You can edit the query in the panel if your field names differ.
+
+---
+
+### 5) Optional: provisioning for one-click setup
+
+Provisioning lets Grafana auto-create data sources and dashboards at startup.
+
+**Datasource provisioning (example for Athena):**
+
+```yaml
+# grafana/provisioning/datasources/ds.yaml
+apiVersion: 1
+
+datasources:
+  - name: Athena (Cost Guard)
+    type: grafana-athena-datasource
+    isDefault: false
+    editable: true
+    jsonData:
+      defaultRegion: ${AWS_REGION}
+      workgroup: ${ATHENA_WORKGROUP}
+      catalog: ${ATHENA_CATALOG}
+      database: ${ATHENA_DATABASE}
+      outputLocation: ${ATHENA_OUTPUT}
+```
+
+**Dashboard provisioning (optional):**
+
+```yaml
+# grafana/provisioning/dashboards/dash.yaml
+apiVersion: 1
+
+providers:
+  - name: CostGuard
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+```
+
+Place `grafana-dash.json` under `grafana/dashboards` and mount that folder for Docker (see install command).
+
+---
+
+### 6) Alerts
+
+* **Quick**: On the cost panel, toggle **Alert** and create a rule like “Daily spend > \$X for 1h”. Use email/Slack/Teams notifiers.
+* **Athena-based**: Use a time series query (e.g., last 24h spend) and create an alert rule on the resulting series. Schedule the rule at a cadence that matches your data freshness (CUR often lags by a few hours).
+* **AWS-native**: If you prefer not to use Grafana for alerting, enable **AWS Budgets** and **Cost Anomaly Detection** in the AWS console.
+
+---
+
+### 7) Files to include in the repo
+
+```
+/grafana/
+  grafana-dash.json                  # exported with "Export for sharing externally"
+  /provisioning/datasources/ds.yaml  # optional
+  /provisioning/dashboards/dash.yaml # optional
+/athena/
+  cost_daily.sql                     # example query
+/assets/
+  before-after.png
+```
+
+### 8) Troubleshooting
+
+* **No data**: CUR can lag; give it a few hours. Ensure the SQL filters (year/month/date) match your data.
+* **Import errors**: Re-export the dashboard with **Export for sharing externally** to strip local UIDs.
+* **Region issues**: Cost Explorer is effectively `us-east-1`. Athena runs in the region of your S3/Glue setup.
+* **Auth**: Prefer IAM roles over static keys when possible.
+
 ---
 
 ## 🧰 Development & Tests

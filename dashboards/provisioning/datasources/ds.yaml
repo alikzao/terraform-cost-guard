@@ -1,0 +1,17 @@
+apiVersion: 1
+
+datasources:
+  - name: Athena (Cost Guard)
+    type: grafana-athena-datasource
+    isDefault: false
+    editable: true
+    jsonData:
+      defaultRegion: ${AWS_REGION}
+      workgroup: ${ATHENA_WORKGROUP}
+      catalog: ${ATHENA_CATALOG}        # обычно AwsDataCatalog
+      database: ${ATHENA_DATABASE}      # база, где лежит cost_daily
+      outputLocation: ${ATHENA_OUTPUT}  # s3://athena-results-<acct>-<region>/query-results/
+      authType: default                 # или 'keys' при явных ключах
+    secureJsonData:
+      accessKey: ${AWS_ACCESS_KEY_ID}       # если authType=keys
+      secretKey: ${AWS_SECRET_ACCESS_KEY}

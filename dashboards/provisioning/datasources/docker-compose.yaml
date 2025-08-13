@@ -1,0 +1,17 @@
+services:
+  grafana:
+    image: grafana/grafana:10.4.0
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards   # optionals
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - AWS_REGION=eu-central-1
+      - ATHENA_WORKGROUP=primary
+      - ATHENA_CATALOG=AwsDataCatalog
+      - ATHENA_DATABASE=cost_guard
+      - ATHENA_OUTPUT=s3://athena-results-<acct>-eu-central-1/query-results/
+      # Если используете IAM роли (EC2/ECS) — ключи не нужны
+      # - AWS_ACCESS_KEY_ID=...
+      # - AWS_SECRET_ACCESS_KEY=...
