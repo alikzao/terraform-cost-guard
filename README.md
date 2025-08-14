@@ -1,3 +1,5 @@
+[![Terraform Version](https://img.shields.io/badge/Terraform-%E2%89%A5%201.8-blue?logo=terraform)](https://www.terraform.io)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 # Terraform Cost Guard — FinOps PoC for Idle Resource Detection & Cleanup
 
@@ -28,10 +30,6 @@
 ## Logs after stop
 ## 💰 Cost Comparison: AWS vs. Bare metal
 
-[![Terraform Version](https://img.shields.io/badge/Terraform-%E2%89%A5%201.8-blue?logo=terraform)](https://www.terraform.io)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-
-# FinOps PoC — Idle-killer (discover → approve → act)
 
 ## What it does
 
