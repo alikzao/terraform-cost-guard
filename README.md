@@ -1,34 +1,21 @@
 [![Terraform Version](https://img.shields.io/badge/Terraform-%E2%89%A5%201.8-blue?logo=terraform)](https://www.terraform.io)
+[![AWS](https://img.shields.io/badge/AWS-Deployed-orange?logo=amazon-aws&logoColor=white)](https://aws.amazon.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 # Terraform Cost Guard — FinOps PoC for Idle Resource Detection & Cleanup
 
-## What it does
-## Safety & controls
-## How to run
-## Observability & outcome
-## 🚀 Quick Start
-## 🎬 Live Demo
-## 🛠️ How It Works
-## 🔧 Inputs
-## 📤 Outputs
-## FinOps: Athena + CUR and a Fast Backfill (PoC)
-### Architecture (TL;DR)
-### Prerequisites
-### Terraform: finops_cur module (key points)
-### Post-apply: one-time manual steps
-### Quick backfill (June–July) from Cost Explorer
-### Grafana (Docker, local)
-### Common errors & quick fixes
-### PoC cleanup
-### Appendix: minimal IAM policy for Grafana (Athena)
-### Roadmap / “proper” approach
-## 📈 Dashboard
-## 📊 Extended description Grafana: Setup & Usage
-## 🧰 Development & Tests
-## 📜 License
-## Logs after stop
-## 💰 Cost Comparison: AWS vs. Bare metal
+## 📋 Table of Contents
+
+- [🚀 Quick Start](#-quick-start)
+- [💡 What it does](#-what-it-does)
+- [🔍 How It Works](#-how-it-works)
+- [⚙️ Configuration](#️-configuration)
+- [📊 Cost Analytics & Grafana](#-cost-analytics--grafana)
+- [🛠️ Prerequisites](#️-prerequisites)
+- [📈 Grafana Dashboard](#-grafana-dashboard)
+- [🔧 Troubleshooting](#-troubleshooting)
+- [🤝 Contributing](#-contributing)
+- [📄 License](#-license)
 
 
 ## What it does
@@ -47,7 +34,7 @@
 
 ```bash
 # 1) Discover only (logs only)
-teraform init && terraform apply -auto-approve
+terraform init && terraform apply -auto-approve
 
 # 2) Change to dry-run mode (no actions) in ./examples/simple/main.tf
 # dry_run = true
@@ -66,7 +53,7 @@ terraform apply
 
 ```hcl
 module "cost_guard" {
-  source        = "github.com/your‑org/terraform-cost-guard"
+  source        = "github.com/alikzao/terraform-cost-guard"
 
   # Core settings
   idle_days     = 7                    # How many idle days before action
@@ -97,12 +84,10 @@ terraform init && terraform apply -auto-approve
 ---
 
 ## 🛠️ How It Works
-
-1. **Discovery** – A Lambda (built via this module) queries CloudWatch metrics and tags to find idle resources.
-2. **Filter** – If CPU / IOPS ≈ 0 for `idle_days`, the resource is flagged.
-3. **Action** – `ec2 stop‑instances` & `ebs disable-volume` (or report‑only in dry‑run).
-4. **Dashboard** – Cost Explorer data feeds a minimal Grafana panel (`grafana-dash.json`).
-
+- **Discovery** – A Lambda queries CloudWatch metrics and tags to find idle resources
+- **Filter** – If CPU / IOPS ≈ 0 for `idle_days`, the resource is flagged
+- **Action** – `ec2 stop-instances` & `ebs disable-volume` (or report-only in dry-run)
+- **Dashboard** – Cost Explorer data feeds a minimal Grafana panel (`grafana-dash.json`)
 ---
 
 ## 🔧 Inputs
@@ -394,8 +379,9 @@ For MAC users, add the following to your `~/.aws/credentials` file:
 
 ```bash
 docker run -d -p 3000:3000 --name=grafana \
--v "$HOME/.aws:/usr/share/grafana/.aws:ro" grafana/grafana
-
+  -v "$HOME/.aws:/usr/share/grafana/.aws:ro" \
+  grafana/grafana
+  
 Check conection to AWS
 docker exec -u grafana -it grafana cat /usr/share/grafana/.aws/credentials
 ```
