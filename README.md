@@ -1,14 +1,66 @@
 
-# Terraform Cost Guard
+# Terraform Cost Guard — FinOps PoC for Idle Resource Detection & Cleanup
+
+## What it does
+## Safety & controls
+## How to run
+## Observability & outcome
+## 🚀 Quick Start
+## 🎬 Live Demo
+## 🛠️ How It Works
+## 🔧 Inputs
+## 📤 Outputs
+## FinOps: Athena + CUR and a Fast Backfill (PoC)
+### Architecture (TL;DR)
+### Prerequisites
+### Terraform: finops_cur module (key points)
+### Post-apply: one-time manual steps
+### Quick backfill (June–July) from Cost Explorer
+### Grafana (Docker, local)
+### Common errors & quick fixes
+### PoC cleanup
+### Appendix: minimal IAM policy for Grafana (Athena)
+### Roadmap / “proper” approach
+## 📈 Dashboard
+## 📊 Extended description Grafana: Setup & Usage
+## 🧰 Development & Tests
+## 📜 License
+## Logs after stop
+## 💰 Cost Comparison: AWS vs. Bare metal
 
 [![Terraform Version](https://img.shields.io/badge/Terraform-%E2%89%A5%201.8-blue?logo=terraform)](https://www.terraform.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Stop paying for idle AWS compute in **under 5 minutes**. *Terraform Cost Guard* discovers forgotten EC2 instances and EBS volumes, then stops them automatically—so you only pay for what you actually use.
+# FinOps PoC — Idle-killer (discover → approve → act)
 
-* **‑37 % AWS spend** in just 14 days on our test account
-* Dry‑run by default—zero risk
-* One Terraform module + one Grafana panel = done
+## What it does
+
+* **Discover (safe by default):** scans the AWS account for **idle** resources — EC2 (low CPU / no network), detached or orphaned **EBS** volumes, **RDS** with no connections, and quiet **ECS/Fargate** services.
+  Findings are **logged with reasons** (what, where, why it’s idle, proposed action).
+* **Act (opt-in):** when the **execution flag** is enabled, the PoC applies cleanup: stop/terminate EC2, delete/archive EBS, scale down/disable services, etc.
+
+## Safety & controls
+
+* **Dry-run first**: no destructive actions unless explicitly enabled.
+* **Tag guards**: resources with `keep=true` (or your configured allowlist) are skipped.
+* **Idempotent** actions with detailed audit logs.
+
+## How to run
+
+```bash
+# 1) Discover only (logs only)
+teraform init && terraform apply -auto-approve
+
+# 2) Change to dry-run mode (no actions) in ./examples/simple/main.tf
+# dry_run = true
+terraform apply
+```
+
+## Observability & outcome
+
+* Logs in **CloudWatch** (and/or S3 if configured) with per-resource decisions.
+* Cost impact validated via **Athena → Grafana** daily **\$/day** chart (before/after).
+
 
 ---
 
@@ -72,6 +124,265 @@ terraform init && terraform apply -auto-approve
 | `estimated_savings_daily` | Approx. USD saved per day              |
 
 ---
+
+
+# FinOps: Athena + CUR and a Fast Backfill (PoC)
+
+> Goal: produce a **daily cost** time series in Grafana for a FinOps PoC, even if historical data wasn’t originally exported. Pipeline: CUR → S3 (us‑east‑1) → Glue Crawler → Athena (eu‑central‑1) → Grafana. For June–July we do a **quick backfill** from Cost Explorer.
+
+---
+
+## Architecture (TL;DR)
+
+* **CUR (legacy)** writes Parquet files to S3 bucket `cost-baseline-trash-cur-ac570c21` in **us‑east‑1**.
+* **Glue Crawler** builds the Glue **database `aws_cur`** and a table **`cost_baseline_trash_daily_parquet`**.
+* **Athena** runs in **eu‑central‑1**, workgroup **`finops-cur`**, and writes query results to `s3://athena-results-851725515436-eu-central-1/`.
+* **Grafana (Docker, local)** connects to Athena and plots the time series.
+* For months *before* CUR was enabled (June–July) we backfill from **Cost Explorer** (TSV → S3 → external table → view that unions CE + CUR).
+
+> Note: the **“Receive Billing Alerts”** checkbox only affects CloudWatch `AWS/Billing` metrics (EstimatedCharges). It is **not** related to CUR/Athena.
+
+---
+
+## Prerequisites
+
+* AWS CLI is configured and working.
+* IAM permissions (minimum): `cur:PutReportDefinition`, `s3:*` on your buckets, `glue:*`, `athena:*` (read/query), `sts:GetCallerIdentity`.
+* Regions: CUR bucket in **us‑east‑1**, Athena/Glue/results in **eu‑central‑1**.
+
+---
+
+## Terraform: `finops_cur` module (key points)
+
+* Uses provider alias `aws.us_east_1` (CUR API is global; CUR S3 sits in us‑east‑1).
+* Creates:
+
+    * S3 for CUR (`cost-baseline-trash-cur-<hex>`, here: `cost-baseline-trash-cur-ac570c21`) with `force_destroy` and lifecycle retention.
+    * Bucket policy for `billingreports.amazonaws.com`.
+    * `aws_cur_report_definition` (Parquet + `RESOURCES` + `ATHENA`).
+    * Athena workgroup `finops-cur` with results at `s3://athena-results-851725515436-eu-central-1/`.
+    * Glue: `aws_glue_catalog_database aws_cur`, `aws_glue_crawler cost-baseline-trash-cur-crawler`, and an IAM role for the crawler.
+
+### Root wiring example
+
+```hcl
+provider "aws" { region = "eu-central-1" }
+provider "aws" { alias = "us_east_1" region = "us-east-1" }
+
+terraform {
+  required_providers {
+    aws    = { source = "hashicorp/aws", version = ">= 5.50.0" }
+    random = { source = "hashicorp/random", version = "~> 3.6" }
+  }
+}
+
+module "finops_cur" {
+  source     = "../../modules/finops_cur"
+  project    = "cost-baseline-trash"
+  aws_region = "eu-central-1"
+  providers = {
+    aws           = aws
+    aws.us_east_1 = aws.us_east_1
+    random        = random
+  }
+}
+```
+
+### Notes / small fixes
+
+* `aws_s3_bucket_lifecycle_configuration` must include `filter { prefix = "" }`.
+* For Glue DB use **`aws_glue_catalog_database`** (not `aws_glue_database`).
+* If the Athena results bucket already exists (`athena-results-851725515436-eu-central-1`), import it:
+
+  ```bash
+  terraform import 'module.finops_cur.aws_s3_bucket.athena_results' athena-results-851725515436-eu-central-1
+  ```
+
+---
+
+## Post‑apply: one‑time manual steps
+
+1. **Verify CUR files**:
+
+   ```bash
+   aws s3 ls s3://cost-baseline-trash-cur-ac570c21/cur/ --region us-east-1
+   ```
+
+   Expect first Parquet files within 2–24h after enabling the report.
+2. **Run Glue Crawler** (creates the table):
+
+   ```bash
+   aws glue start-crawler --name cost-baseline-trash-cur-crawler --region eu-central-1
+   ```
+3. **Athena** (eu‑central‑1, WG `finops-cur`): database `aws_cur`, table `cost_baseline_trash_daily_parquet`.
+
+---
+
+## Quick backfill (June–July) from Cost Explorer
+
+> Purpose: get history before CUR was active without migrating to Data Exports right now.
+
+1. **Create TSV locally**
+
+```bash
+aws ce get-cost-and-usage \
+  --time-period Start=2025-06-01,End=2025-08-01 \
+  --granularity DAILY \
+  --metrics UnblendedCost \
+  --query 'ResultsByTime[*].[TimePeriod.Start,Total.UnblendedCost.Amount]' \
+  --output text \
+| tr -d '\r' > /tmp/ce_backfill_jun_jul.tsv
+
+head -n 5 /tmp/ce_backfill_jun_jul.tsv   # should show dates, not "None"
+```
+
+2. **Upload to S3 (eu‑central‑1)**
+
+```bash
+aws s3 cp /tmp/ce_backfill_jun_jul.tsv \
+  s3://athena-results-851725515436-eu-central-1/ce-backfill/ \
+  --region eu-central-1
+```
+
+3. **Athena: table & views** *(run each as a separate query)*
+
+```sql
+-- Robust parser for TSV/space+tab via RegexSerDe (raw table)
+DROP TABLE IF EXISTS aws_cur.ce_backfill_regex;
+CREATE EXTERNAL TABLE aws_cur.ce_backfill_regex (
+  day_str  string,
+  cost_str string
+)
+ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.RegexSerDe'
+WITH SERDEPROPERTIES ("input.regex" = "^(\\S+)\\s+(\\S+)$")
+LOCATION 's3://athena-results-851725515436-eu-central-1/ce-backfill/';
+
+-- Safe type casting
+CREATE OR REPLACE VIEW aws_cur.ce_backfill AS
+SELECT
+  try_cast(day_str  AS date)   AS day,
+  try_cast(cost_str AS double) AS cost_usd
+FROM aws_cur.ce_backfill_regex
+WHERE try_cast(day_str AS date) IS NOT NULL
+  AND try_cast(cost_str AS double) IS NOT NULL;
+
+-- Union CE backfill + live CUR (no hard date boundary)
+CREATE OR REPLACE VIEW aws_cur.cost_daily AS
+SELECT day, ROUND(SUM(cost_usd), 2) AS cost_usd
+FROM (
+  SELECT day, cost_usd FROM aws_cur.ce_backfill
+  UNION ALL
+  SELECT
+    date_trunc('day', CAST(line_item_usage_start_date AS timestamp)) AS day,
+    CAST(line_item_unblended_cost AS double)                         AS cost_usd
+  FROM aws_cur.cost_baseline_trash_daily_parquet
+) t
+WHERE day IS NOT NULL
+GROUP BY day;
+```
+
+4. **Check**
+
+```sql
+SELECT day, cost_usd
+FROM aws_cur.cost_daily
+WHERE day >= DATE '2025-06-01'
+ORDER BY day;
+```
+
+---
+
+## Grafana (Docker, local)
+
+1. **Run Grafana with the Athena plugin**
+
+```bash
+docker stop grafana 2>/dev/null && docker rm grafana 2>/dev/null
+
+docker run -d --name grafana -p 3000:3000 \
+  -e GF_INSTALL_PLUGINS=grafana-athena-datasource \
+  -e AWS_SDK_LOAD_CONFIG=1 \
+  -v grafana-data:/var/lib/grafana \
+  -v $HOME/.aws:/usr/share/grafana/.aws:ro \
+  grafana/grafana:latest
+```
+
+2. **Add data source → Amazon Athena**
+
+    * Region: `eu-central-1`
+    * Workgroup: `finops-cur`
+    * Catalog: `AwsDataCatalog`
+    * Database: `aws_cur`
+    * Output location: `s3://athena-results-851725515436-eu-central-1/`
+3. **Panel (Time series)**
+
+```sql
+SELECT
+  day AS time,
+  cost_usd
+FROM aws_cur.cost_daily
+WHERE day >= DATE '2025-06-01' AND day <= current_date
+ORDER BY day;
+```
+
+Unit: **USD**. Add an annotation at the optimization start date.
+
+---
+
+## Common errors & quick fixes
+
+* **Athena: “The S3 location provided… is invalid”** → results bucket must be in the *same region* as Athena. Use `athena-results-851725515436-eu-central-1` in WG `finops-cur`.
+* **`SCHEMA_NOT_FOUND`** → no CUR files yet; wait up to 24h or run Glue Crawler; `aws_cur` will appear after the first pass.
+* **`TABLE_NOT_FOUND`** → the real table name differs (dashes replaced). `SHOW TABLES IN aws_cur;` and update SQL.
+* **S3 `BucketAlreadyOwnedByYou`** → the bucket was created manually; import it into state.
+* **Lifecycle warning** → add `filter { prefix = "" }` to `aws_s3_bucket_lifecycle_configuration`.
+* **Glue “unsupported resource”** → upgrade AWS provider to `>= 5.50.0` and use `aws_glue_catalog_database`.
+* **Backfill parsing issues** → use RegexSerDe + `try_cast` as shown above.
+
+---
+
+## PoC cleanup
+
+```bash
+# remove CE backfill CSV/TSV if desired
+aws s3 rm s3://athena-results-851725515436-eu-central-1/ce-backfill/ --recursive --region eu-central-1
+
+# terraform destroy in the env folder will remove CUR bucket, WG, crawler, etc.
+```
+
+---
+
+## Appendix: minimal IAM policy for Grafana (Athena)
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {"Effect":"Allow","Action":[
+      "athena:StartQueryExecution","athena:GetQueryExecution","athena:GetQueryResults",
+      "athena:ListWorkGroups","athena:ListDataCatalogs","athena:ListDatabases","athena:ListTableMetadata"
+    ],"Resource":"*"},
+    {"Effect":"Allow","Action":[
+      "glue:GetDatabase","glue:GetDatabases","glue:GetTable","glue:GetTables"
+    ],"Resource":"*"},
+    {"Effect":"Allow","Action":["s3:GetObject","s3:ListBucket"],
+     "Resource":[
+       "arn:aws:s3:::athena-results-851725515436-eu-central-1",
+       "arn:aws:s3:::athena-results-851725515436-eu-central-1/*"
+     ]}
+  ]
+}
+```
+
+---
+
+## Roadmap / “proper” approach
+
+* Migrate from legacy CUR to **Billing → Data Exports (Cost & Usage)** with Athena auto‑integration and request historical backfill from AWS Support.
+* Replace CE CSV/TSV backfill with native Parquet.
+* Add unit‑cost KPIs (divide by `usage_amount`), tags/BU filters, etc.
+
+
 
 ## 📈 Dashboard
 
